@@ -9,18 +9,18 @@ from scipy.integrate import odeint
 
 projectile_mass = 1000
 initial_velocity = 5500
-launch_angle_degrees = 17.75
+launch_angle_degrees = 19.4
 launch_angle_radians = (np.pi / 180) * (launch_angle_degrees)
 
 C_d = 0.15
-Rocket_CS_Area = np.pi * (0.15 ** 2) / 4
-empty_mass = 457  #Mass of rocket after fuel is spent
-yaw_degrees = -20
+Rocket_CS_Area = np.pi * (1 ** 2) / 4
+empty_mass = 420  #Mass of rocket after fuel is spent
+yaw_degrees = -18
 yaw_radians = yaw_degrees*np.pi/180
 
 
 Isp = 300   #in seconds
-max_accel = 20 * 9.81
+max_accel = 100 * 9.81
 
 #Contstants and Initializations
 G= 6.67 * 10**(-11)
@@ -45,7 +45,7 @@ measured_density_data = np.array([
     0.0008283, 0.00001846
 ])
 
-coefficients = np.polyfit(altitude_data, measured_density_data, 5)
+coefficients = np.polyfit(altitude_data, measured_density_data, 6)
 
 #Functions
 air_density = np.poly1d(coefficients)
@@ -85,13 +85,17 @@ def drag(altitude, xdot, ydot, current_mass):
     global C_d, Rocket_CS_Area
     velocity = np.sqrt(xdot**2 + ydot**2)
     inst_theta = np.arctan(ydot/xdot)
-    d = -0.5 * air_density(altitude) * (velocity ** 2) * C_d * Rocket_CS_Area / current_mass
+    inst_density = air_density(altitude)
+    if inst_density<0:
+        inst_density = 0
+    d = -0.5 * inst_density * (velocity ** 2) * C_d * Rocket_CS_Area / current_mass
     dx = d * np.cos(inst_theta)
     dy = d * np.sin(inst_theta)
     return dx, dy
 
 
 def dVdt(S, t):
+    global empty_mass
     [xdot,ydot,x,y,m] = S
     h_center = np.sqrt(x**2 + y**2)
     altitude = h_center-R_e
@@ -100,7 +104,7 @@ def dVdt(S, t):
     [gx, gy] = gravity(h_center, x, y)
 
     #Thrust Acceleration#
-    [tax, tay, mdot] = propulsion(altitude, m, Isp, 457,yaw_radians)
+    [tax, tay, mdot] = propulsion(altitude, m, Isp, empty_mass,yaw_radians)
 
     #Drag Acceleration#
     [dx, dy] = drag(altitude, xdot, ydot, m)
