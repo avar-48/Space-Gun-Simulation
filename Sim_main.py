@@ -13,12 +13,14 @@ launch_angle_degrees = 17.75
 launch_angle_radians = (np.pi / 180) * (launch_angle_degrees)
 
 C_d = 0.15
-A = np.pi * (0.15**2) / 4
-empty_mass = 457
+Rocket_CS_Area = np.pi * (0.15 ** 2) / 4
+empty_mass = 457  #Mass of rocket after fuel is spent
+yaw_degrees = -20
+yaw_radians = yaw_degrees*np.pi/180
 
 
 Isp = 300   #in seconds
-max_accel = 100 * 9.81
+max_accel = 20 * 9.81
 
 #Contstants and Initializations
 G= 6.67 * 10**(-11)
@@ -27,20 +29,36 @@ R_e = 6.378 * 10**6
 g0 = 9.81
 v_sin = initial_velocity * np.sin(launch_angle_radians)
 v_cos = initial_velocity * np.cos(launch_angle_radians)
-engine_on_time = 0
-engine_off_time = 0
 is_engine_on = False
 
+#Air density data and curve fitting
+altitude_data = (10 ** 3) * np.array([
+    0, 1, 2, 3, 4, 5, 6, 7, 8, 9, 10,
+    15, 20, 25, 30, 40, 50, 60, 70, 80
+])
+
+measured_density_data = np.array([
+    1.225, 1.112, 1.007, 0.9093, 0.8194,
+    0.7364, 0.6601, 0.59, 0.5258, 0.4671,
+    0.4135, 0.1948, 0.08891, 0.04008,
+    0.01841, 0.003996, 0.001027, 0.0003097,
+    0.0008283, 0.00001846
+])
+
+coefficients = np.polyfit(altitude_data, measured_density_data, 5)
+
 #Functions
+air_density = np.poly1d(coefficients)
 
 def gravity(h_center, x, y):
-    g = -G*M_e/(h_center)**2
+    global G, M_e
+    g = -G * M_e / (h_center)**2
     gx = g * x / h_center
     gy = g * y / h_center
     return gx, gy
 
-def propulsion(current_atltiude, current_mass, Isp, empty_mass, t):
-    global engine_on_time,engine_off_time, max_accel, is_engine_on
+def propulsion(current_atltiude, current_mass, Isp, empty_mass, yaw):
+    global max_accel, is_engine_on
 
     if is_engine_on == False:
         "Activate rocket engine at set altitude"
@@ -52,15 +70,26 @@ def propulsion(current_atltiude, current_mass, Isp, empty_mass, t):
     if activation_condition:
         is_engine_on = True
         ta = max_accel
-        mdot = -ta*current_mass/(Isp*9.81)
-        if engine_on_time==0:
-            engine_on_time = t
-        else:
-            engine_off_time = t
+        tax = ta*np.cos(yaw)
+        tay = ta*np.sin(yaw)
+        mdot = -ta * current_mass / (Isp * 9.81)
+
     else:
-        ta = 0
+        tax = 0
+        tay = 0
         mdot = 0
-    return ta, mdot
+
+    return tax, tay, mdot
+
+def drag(altitude, xdot, ydot, current_mass):
+    global C_d, Rocket_CS_Area
+    velocity = np.sqrt(xdot**2 + ydot**2)
+    inst_theta = np.arctan(ydot/xdot)
+    d = -0.5 * air_density(altitude) * (velocity ** 2) * C_d * Rocket_CS_Area / current_mass
+    dx = d * np.cos(inst_theta)
+    dy = d * np.sin(inst_theta)
+    return dx, dy
+
 
 def dVdt(S, t):
     [xdot,ydot,x,y,m] = S
@@ -71,19 +100,14 @@ def dVdt(S, t):
     [gx, gy] = gravity(h_center, x, y)
 
     #Thrust Acceleration#
-    [ta, mdot] = propulsion(altitude, m, Isp, 457,t)
-
-    yaw = -20*np.pi/180#np.arctan(ydot/xdot)
-
-    tax = ta*np.cos(yaw)
-    tay = ta*np.sin(yaw)
+    [tax, tay, mdot] = propulsion(altitude, m, Isp, 457,yaw_radians)
 
     #Drag Acceleration#
-    d = 0
+    [dx, dy] = drag(altitude, xdot, ydot, m)
 
-    xdotdot = gx + tax
+    xdotdot = gx + tax + dx
 
-    ydotdot = gy + tay
+    ydotdot = gy + tay + dy
 
     if altitude <=0:
         [xdotdot, ydotdot, xdot, ydot, mdot] = [0,0,0,0,0]
@@ -94,13 +118,13 @@ def dVdt(S, t):
 
 t = np.linspace(0,10000,5000)
 S0 = (v_cos+460, v_sin, 0, R_e+0.001, projectile_mass)
-Sol = odeint(dVdt, S0, t, hmax=1)
+Sol = odeint(dVdt, S0, t)
 
 [xdot_rocket, ydot_rocket, x_rocket, y_rocket, mass] = Sol.T
 
-rocket_fire_time = (t >= engine_on_time) & (t <= engine_off_time)
-powered_y = y_rocket[rocket_fire_time]
-powered_x = x_rocket[rocket_fire_time]
+rocket_fire_time_mask = (mass >= empty_mass) & (mass < projectile_mass)
+powered_y = y_rocket[rocket_fire_time_mask]
+powered_x = x_rocket[rocket_fire_time_mask]
 
 
 #Plots
